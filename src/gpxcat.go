@@ -74,7 +74,6 @@ func LoadGPX(name string) (gpx Gpx, err error) {
 }
  
 func main() {
-	fmt.Printf("%d", os.Args[1:])
 	var cat Gpx
 	for _, name := range os.Args[1:] {
 		q, err := LoadGPX(name)
