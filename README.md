@@ -1,3 +1,5 @@
-# gpxcat
+=======
+gpxcat
+======
 
-gpxcat concatinates gpx files.
+Concatinates GPX files.
