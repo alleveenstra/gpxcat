@@ -32,19 +32,15 @@ type Track struct {
 	Segments []Segment `xml:"trkseg"`
 }
 
-type ByDate []Segment
+type ByDate []Point
 
 func (a ByDate) Len() int      { return len(a) }
 func (a ByDate) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
 func (a ByDate) Less(i, j int) bool {
-	if len(a[i].Points) == 0 || len(a[j].Points) == 0 {
-		return false
+	if !a[i].Valid || !a[j].Valid {
+		return true
 	}
-	i_time, i_err := time.Parse("2006-01-02T15:04:05Z", a[i].Points[0].Time)
-	fatal(i_err)
-	j_time, j_err := time.Parse("2006-01-02T15:04:05Z", a[j].Points[0].Time)
-	fatal(j_err)
-	return j_time.After(i_time)
+	return a[j].GoTime.After(a[i].GoTime)
 }
 
 func fatal(err error) {
@@ -83,14 +79,18 @@ type Point struct {
 	Longitude float64 `xml:"lon,attr"`
 	Elevation float32 `xml:"ele"`
 	Time      string  `xml:"time"`
+	GoTime    time.Time
+	Valid     bool
 }
 
 func (point *Point) Print(wrt io.Writer) {
-	fmt.Fprintf(wrt, `			<trkpt lat="%.10f" lon="%.10f">
+	if point.Valid {
+		fmt.Fprintf(wrt, `			<trkpt lat="%.10f" lon="%.10f">
 				<ele>%.2f</ele>
 				<time>%s</time>
 			</trkpt>
 `, point.Latitude, point.Longitude, point.Elevation, point.Time)
+	}
 }
 
 func LoadGPX(name string) (gpx Gpx, err error) {
@@ -126,9 +126,6 @@ func main() {
 		cat.Trk.Segments = append(cat.Trk.Segments, segment)
 	}
 
-	// sort
-	sort.Sort(ByDate(cat.Trk.Segments))
-
 	// desegmentize
 	segments := make([]Segment, 1)
 	for _, segment := range cat.Trk.Segments {
@@ -136,12 +133,23 @@ func main() {
 	}
 	cat.Trk.Segments = segments
 
+	// parse dates && validate
+	points := cat.Trk.Segments[0].Points
+	for index := range points {
+		i_time, i_err := time.Parse("2006-01-02T15:04:05Z", points[index].Time)
+		points[index].GoTime = i_time
+		points[index].Valid = i_err == nil
+	}
+
+	// sort
+	sort.Sort(ByDate(cat.Trk.Segments[0].Points))
+
 	// by date
 	gpxMap := make(map[string]Gpx)
 	for _, point := range cat.Trk.Segments[0].Points {
-		p_time, parse_error := time.Parse("2006-01-02T15:04:05Z", point.Time)
+		p_time := point.GoTime
 		p_time.Add(time.Hour * -7)
-		if parse_error == nil {
+		if point.Valid {
 			date_str := p_time.Format("02-01-2006")
 			track := gpxMap[date_str]
 			if len(track.Trk.Segments) == 0 {
