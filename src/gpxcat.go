@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/xml"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -10,6 +11,16 @@ import (
 	"sort"
 	"time"
 )
+
+var Resegment bool
+var Out string
+var Format string
+
+func init() {
+	flag.StringVar(&Format, "format", "02-01-2006", "the format of tracknames")
+	flag.StringVar(&Out, "out", "out", "the directory to output tracks (must exist)")
+	flag.BoolVar(&Resegment, "resegment", false, "resegment the track according to a format")
+}
 
 type Gpx struct {
 	Trk Track `xml:"trk"`
@@ -106,8 +117,10 @@ func LoadGPX(name string) (gpx Gpx, err error) {
 }
 
 func main() {
+	flag.Parse()
+
 	var cat Gpx
-	for _, name := range os.Args[1:] {
+	for _, name := range flag.Args() {
 		q, err := LoadGPX(name)
 		if err != nil {
 			log.Fatalf("Error loading GPX file: %d", err)
@@ -144,29 +157,31 @@ func main() {
 	// sort
 	sort.Sort(ByDate(cat.Trk.Segments[0].Points))
 
-	// by date
-	gpxMap := make(map[string]Gpx)
-	for _, point := range cat.Trk.Segments[0].Points {
-		p_time := point.GoTime
-		p_time.Add(time.Hour * -7)
-		if point.Valid {
-			date_str := p_time.Format("02-01-2006")
-			track := gpxMap[date_str]
-			if len(track.Trk.Segments) == 0 {
-				track.Trk.Segments = make([]Segment, 1)
+	if Resegment {
+		// by date
+		gpxMap := make(map[string]Gpx)
+		for _, point := range cat.Trk.Segments[0].Points {
+			p_time := point.GoTime
+			p_time.Add(time.Hour * -7)
+			if point.Valid {
+				date_str := p_time.Format(Format)
+				track := gpxMap[date_str]
+				if len(track.Trk.Segments) == 0 {
+					track.Trk.Segments = make([]Segment, 1)
+				}
+				track.Trk.Segments[0].Points = append(track.Trk.Segments[0].Points, point)
+				gpxMap[date_str] = track
 			}
-			track.Trk.Segments[0].Points = append(track.Trk.Segments[0].Points, point)
-			gpxMap[date_str] = track
 		}
-	}
 
-	// output to files
-	for date_str, track := range gpxMap {
-		file, err := os.Create(fmt.Sprintf("out/%s.gpx", date_str))
-		defer file.Close()
-		fatal(err)
-		track.Print(file)
+		// output to files
+		for date_str, track := range gpxMap {
+			file, err := os.Create(fmt.Sprintf("%s/%s.gpx", Out, date_str))
+			defer file.Close()
+			fatal(err)
+			track.Print(file)
+		}
+	} else {
+		cat.Print(os.Stdout)
 	}
-
-	//cat.Print()
 }
