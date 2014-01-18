@@ -1,57 +1,26 @@
 package main
 
 import (
-	"encoding/xml"
 	"flag"
-	"fmt"
-	"io"
-	"io/ioutil"
+	"gpx"
 	"log"
 	"os"
 	"sort"
 	"time"
 )
 
+var Keep int
+var Simplify bool
 var Resegment bool
 var Out string
 var Format string
 
 func init() {
-	flag.StringVar(&Format, "format", "02-01-2006", "the format of tracknames")
+	flag.StringVar(&Format, "format", "2006-01-02", "the format of tracknames")
 	flag.StringVar(&Out, "out", "out", "the directory to output tracks (must exist)")
 	flag.BoolVar(&Resegment, "resegment", false, "resegment the track according to a format")
-}
-
-type Gpx struct {
-	Trk Track `xml:"trk"`
-}
-
-func (gpx *Gpx) Print(wrt io.Writer) {
-	fmt.Fprintf(wrt, `<?xml version="1.0" encoding="utf-8" standalone="no"?>
-<gpx xmlns="http://www.topografix.com/GPX/1/1"
-	creator="gpxcat" version="0.1"
-	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
-`)
-	gpx.Trk.Print(wrt)
-	fmt.Fprintf(wrt, `</gpx>
-`)
-}
-
-type Track struct {
-	Name     string    `xml:"name"`
-	Segments []Segment `xml:"trkseg"`
-}
-
-type ByDate []Point
-
-func (a ByDate) Len() int      { return len(a) }
-func (a ByDate) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
-func (a ByDate) Less(i, j int) bool {
-	if !a[i].Valid || !a[j].Valid {
-		return true
-	}
-	return a[j].GoTime.After(a[i].GoTime)
+	flag.BoolVar(&Simplify, "simplify", false, "simplify the track")
+	flag.IntVar(&Keep, "keep", 200, "number of points to keep")
 }
 
 func fatal(err error) {
@@ -61,67 +30,12 @@ func fatal(err error) {
 	}
 }
 
-func (track *Track) Print(wrt io.Writer) {
-	fmt.Fprintf(wrt, `	<trk>
-`)
-	for _, segment := range track.Segments {
-		segment.Print(wrt)
-	}
-	fmt.Fprintf(wrt, `	</trk>
-`)
-}
-
-type Segment struct {
-	Points []Point `xml:"trkpt"`
-}
-
-func (segment *Segment) Print(wrt io.Writer) {
-	fmt.Fprintf(wrt, `		<trkseg>
-`)
-	for _, point := range segment.Points {
-		point.Print(wrt)
-	}
-	fmt.Fprintf(wrt, `		</trkseg>
-`)
-}
-
-type Point struct {
-	Latitude  float64 `xml:"lat,attr"`
-	Longitude float64 `xml:"lon,attr"`
-	Elevation float32 `xml:"ele"`
-	Time      string  `xml:"time"`
-	GoTime    time.Time
-	Valid     bool
-}
-
-func (point *Point) Print(wrt io.Writer) {
-	if point.Valid {
-		fmt.Fprintf(wrt, `			<trkpt lat="%.10f" lon="%.10f">
-				<ele>%.2f</ele>
-				<time>%s</time>
-			</trkpt>
-`, point.Latitude, point.Longitude, point.Elevation, point.Time)
-	}
-}
-
-func LoadGPX(name string) (gpx Gpx, err error) {
-	xmlFile, err := os.Open(name)
-	if err != nil {
-		return gpx, err
-	}
-	defer xmlFile.Close()
-	b, _ := ioutil.ReadAll(xmlFile)
-	xml.Unmarshal(b, &gpx)
-	log.Printf("reading %s", name)
-	return gpx, nil
-}
-
 func main() {
 	flag.Parse()
 
-	var cat Gpx
+	var cat gpx.Gpx
 	for _, name := range flag.Args() {
-		q, err := LoadGPX(name)
+		q, err := gpx.LoadGPX(name)
 		if err != nil {
 			log.Fatalf("Error loading GPX file: %d", err)
 			return
@@ -130,21 +44,10 @@ func main() {
 	}
 
 	// unique
-	unique := make(map[string]Segment)
-	for _, segment := range cat.Trk.Segments {
-		unique[segment.Points[0].Time] = segment
-	}
-	cat.Trk.Segments = make([]Segment, 0)
-	for _, segment := range unique {
-		cat.Trk.Segments = append(cat.Trk.Segments, segment)
-	}
+	cat.Trk.Segments = gpx.Unique(cat.Trk.Segments)
 
 	// desegmentize
-	segments := make([]Segment, 1)
-	for _, segment := range cat.Trk.Segments {
-		segments[0].Points = append(segments[0].Points, segment.Points...)
-	}
-	cat.Trk.Segments = segments
+	cat.Trk.Segments = gpx.Desegmentize(cat.Trk.Segments)
 
 	// parse dates && validate
 	points := cat.Trk.Segments[0].Points
@@ -152,35 +55,19 @@ func main() {
 		i_time, i_err := time.Parse("2006-01-02T15:04:05Z", points[index].Time)
 		points[index].GoTime = i_time
 		points[index].Valid = i_err == nil
+		points[index].Removed = false
 	}
 
 	// sort
-	sort.Sort(ByDate(cat.Trk.Segments[0].Points))
+	sort.Sort(gpx.ByDate(cat.Trk.Segments[0].Points))
+
+	if Simplify {
+		gpx.Simplify(cat.Trk.Segments, Keep)
+	}
 
 	if Resegment {
-		// by date
-		gpxMap := make(map[string]Gpx)
-		for _, point := range cat.Trk.Segments[0].Points {
-			p_time := point.GoTime
-			p_time.Add(time.Hour * -7)
-			if point.Valid {
-				date_str := p_time.Format(Format)
-				track := gpxMap[date_str]
-				if len(track.Trk.Segments) == 0 {
-					track.Trk.Segments = make([]Segment, 1)
-				}
-				track.Trk.Segments[0].Points = append(track.Trk.Segments[0].Points, point)
-				gpxMap[date_str] = track
-			}
-		}
-
-		// output to files
-		for date_str, track := range gpxMap {
-			file, err := os.Create(fmt.Sprintf("%s/%s.gpx", Out, date_str))
-			defer file.Close()
-			fatal(err)
-			track.Print(file)
-		}
+		err := gpx.Resegment(cat, Out, Format)
+		fatal(err)
 	} else {
 		cat.Print(os.Stdout)
 	}
