@@ -12,6 +12,7 @@ import (
 var Keep int
 var Simplify bool
 var Resegment bool
+var Resample bool
 var Out string
 var Format string
 
@@ -20,6 +21,7 @@ func init() {
 	flag.StringVar(&Out, "out", "out", "the directory to output tracks (must exist)")
 	flag.BoolVar(&Resegment, "resegment", false, "resegment the track according to a format")
 	flag.BoolVar(&Simplify, "simplify", false, "simplify the track")
+	flag.BoolVar(&Resample, "resample", false, "resample the track")
 	flag.IntVar(&Keep, "keep", 200, "number of points to keep")
 }
 
@@ -63,6 +65,10 @@ func main() {
 
 	if Simplify {
 		gpx.Simplify(cat.Trk.Segments, Keep)
+	}
+
+	if Resample {
+		gpx.Resample(cat.Trk.Segments, Keep)
 	}
 
 	if Resegment {
