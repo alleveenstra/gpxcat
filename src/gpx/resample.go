@@ -1,7 +1,6 @@
 package gpx
 
 import (
-	"log"
 	"math"
 )
 
