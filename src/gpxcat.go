@@ -15,6 +15,7 @@ var SplitFormat string
 var SplitOutput string
 var Simplify bool
 var Resample bool
+var Statistics bool
 var MergeSegments bool
 var Keep int
 
@@ -25,6 +26,7 @@ func init() {
 	flag.StringVar(&SplitOutput, "split-output", "out", "the directory to output tracks (must exist)")
 	flag.BoolVar(&Simplify, "simplify", false, "simplify the track")
 	flag.BoolVar(&Resample, "resample", false, "resample the track")
+	flag.BoolVar(&Statistics, "statistics", false, "show statistics")
 	flag.BoolVar(&MergeSegments, "merge-segments", false, "merge all segments into one bigger segment")
 	flag.IntVar(&Keep, "keep", 200, "number of points to keep")
 }
