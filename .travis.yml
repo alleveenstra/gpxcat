@@ -1,5 +1,1 @@
 language: go
-script:
-  - export GOPATH=`pwd`
-  - go install gpx
-  - go run src/gpxcat.go
